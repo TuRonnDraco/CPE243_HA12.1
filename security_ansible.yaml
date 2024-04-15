@@ -1,0 +1,128 @@
+---
+-  hosts: all
+   become: true
+   pre_tasks:
+
+   -  name: Upgrade and Update Cache
+      apt:
+        upgrade: dist
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu"
+
+-  hosts: Control_Node
+   become: true
+   tasks:
+
+   -  name: Add Admin Group
+      group:
+        name: admin
+        state: present
+
+   -  name: Add local user
+      user:
+        name: admin
+        group: admin
+        shell: /bin/bash
+        home: /home/admin
+        create_home: yes
+        state: present
+
+   -  name: Add SSH Public Key for Local User
+      authorized_key:
+        user: admin
+        key: "{{lookup('file','~/.ssh/id_rsa.pub')}}"
+        state: present
+
+   -  name: Add sudoer rule for Local User
+      copy:
+        dest: /etc/sudoers.d/admin
+        src: etc/sudoers.d/admin
+        owner: root
+        group: root
+        mode: 0440
+        validate: /usr/sbin/visudo -csf %s
+
+   -  name: Add Hardened SSH Config for Local User
+      copy:
+        dest: /etc/ssh/sshd_config
+        src: etc/ssh/sshd_config
+        owner: root
+        group: root
+        mode: 0600
+
+   -  name: Install Firewalld
+      apt:
+        name: firewalld
+        state: latest
+
+   -  name: Add SSH to Internal Zone of Firewall
+      firewalld:
+        zone: internal
+        service: ssh
+        state: enabled
+        immediate: yes
+        permanent: yes
+
+   -  name: Drop SSH from Public Zone of Firewall
+      firewalld:
+        zone: public
+        service: ssh
+        state: disabled
+        immediate: yes
+        permanent: yes
+
+   -  name: Add permitted networks to Internal Zone of Firewall
+      firewalld:
+        zone: internal
+        source: "{{ item }}"
+        state: enabled
+        immediate: yes
+        permanent: yes
+      loop:
+        - 192.168.56.0/24
+        - 10.10.4.0/24
+
+   -  name: Uninstall Unnecessary packages
+      package:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - tcpdump
+        - nmap-ncat
+        - wpa_supplicant
+
+   -  name: Disable Unnecessary Services
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - postfix
+        - telnet
+      ignore_errors: yes
+
+   -  name: Set MOTD
+      copy:
+        dest: /etc/motd
+        src: etc/motd
+        owner: root
+        group: root
+        mode: 0644
+
+   -  name: Set Login Banner
+      copy:
+        dest: "{{ item }}"
+        src: etc/issue
+        owner: root
+        group: root
+        mode: 0644
+      loop:
+        - /etc/issue
+        - /etc/issue.net
+
+   handlers:
+   -  name: Reload SSH
+      service:
+        name: sshd
+        state: reloaded
+
